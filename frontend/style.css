@@ -1,0 +1,13 @@
+/* style.css */
+body { font-family: sans-serif; margin: 20px; }
+#chatbox { border: 1px solid #ccc; padding: 10px; max-width: 600px; margin: auto; }
+#messages { height: 400px; overflow-y: scroll; border-bottom: 1px solid #eee; margin-bottom: 10px; padding-bottom: 10px; }
+.message { margin: 5px 0; padding: 8px 12px; border-radius: 15px; max-width: 80%; word-wrap: break-word; }
+.user { background-color: #dcf8c6; align-self: flex-end; margin-left: auto; border-bottom-right-radius: 0; }
+.assistant { background-color: #f1f0f0; align-self: flex-start; border-bottom-left-radius: 0; }
+#input-area { display: flex; }
+#user-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; margin-right: 5px; }
+button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; }
+#send-button { background-color: #4CAF50; color: white; }
+#mic-button { background-color: #007bff; color: white; }
+#mic-button.listening { background-color: #dc3545; } /* Style when listening */
