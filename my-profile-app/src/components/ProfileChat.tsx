@@ -1,5 +1,6 @@
 "use client";
 
+// src/components/ProfileChat.tsx (or similar)
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Mic, Square } from 'lucide-react';
 import { fetchAuthSession } from 'aws-amplify/auth';
@@ -190,14 +191,13 @@ export default function ProfileChat() {
         if (transcript) {
           handleSendMessage(transcript);
           setIsListening(false);
-          // Clear status message if it was related to listening
           setStatusMessage(prev => (prev === 'Listening...' || prev === 'Speech detected...') ? '' : prev);
         }
-        // No need to explicitly stop/abort if continuous=false, onend should fire.
       };
 
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        let currentError = event.error;
+        // **FIXED**: Use const as currentError is not reassigned
+        const currentError = event.error;
         console.error('Speech recognition error:', currentError, event.message);
         if (currentError === 'aborted') {
           console.log('Speech recognition aborted (potentially expected).');
@@ -212,7 +212,7 @@ export default function ProfileChat() {
             }
             setStatusMessage(errorMsg);
         }
-        setIsListening(false); // Ensure listening state is always reset on error/abort
+        setIsListening(false);
       };
 
       recognition.onaudiostart = () => {
@@ -223,9 +223,7 @@ export default function ProfileChat() {
 
       recognition.onend = () => {
         console.log('Speech recognition service disconnected.');
-        // This should reliably set listening to false when recognition ends naturally or via abort/error
         setIsListening(false);
-        // Clear status message only if it was related to active listening/detection
         setStatusMessage(prev => (prev === 'Listening...' || prev === 'Speech detected...') ? '' : prev);
       };
 
@@ -260,8 +258,8 @@ export default function ProfileChat() {
         recognitionRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleSendMessage]);
+    // **FIXED**: Removed unused eslint-disable directive below
+  }, [handleSendMessage]); // Only handleSendMessage needed as it's stable via useCallback
 
   // --- Auto-scroll messages ---
   useEffect(() => {
@@ -305,13 +303,11 @@ export default function ProfileChat() {
     }
     try {
       console.log('Manually stopping recognition via abort().');
-      currentRecognition.abort(); // abort() should trigger onerror('aborted') or onend
-      // Explicitly setting state here can sometimes cause race conditions with event handlers.
-      // Rely on onerror/onend to set isListening=false.
+      currentRecognition.abort();
     } catch (error) {
       console.error("Error stopping recognition:", error);
       setStatusMessage('Error stopping microphone');
-      setIsListening(false); // Force reset state on error
+      setIsListening(false);
     }
   }, [isListening]);
 
