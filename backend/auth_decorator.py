@@ -1,8 +1,8 @@
-# auth_decorator.py
 from functools import wraps
-from flask import request, jsonify
+from flask import request, jsonify, g
 import jwt # PyJWT library
 from jwt import PyJWKClient, ExpiredSignatureError, InvalidTokenError
+import traceback # Import traceback for logging
 
 # Import necessary configuration from config.py
 try:
@@ -19,9 +19,12 @@ def token_required(f):
     """
     Decorator to validate Cognito JWT tokens.
     Expects the token in the 'Authorization: Bearer <token>' header.
+    Stores the validated user ID ('sub') in flask.g.user_id.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Clear any previous user ID from context at the start of the request
+        g.user_id = None
         token = None
         auth_header = request.headers.get('Authorization') # Use .get for safety
 
@@ -53,6 +56,14 @@ def token_required(f):
                 audience=COGNITO_APP_CLIENT_ID, # Verify audience matches your App Client ID
                 issuer=COGNITO_ISSUER # Verify issuer matches your User Pool
             )
+
+            # Store the validated user ID ('sub') in Flask's 'g'
+            g.user_id = payload.get('sub')
+            if not g.user_id:
+                 # This case should ideally not happen if Cognito issues valid tokens
+                 print("Validated token is missing 'sub' claim.")
+                 return jsonify({'message': 'Invalid token payload (missing sub)'}), 401
+            
             # Token is valid
             print(f"Token validated successfully for user sub: {payload.get('sub')}")
 
@@ -79,7 +90,6 @@ def token_required(f):
         except Exception as e:
              # Catch potential errors during key fetching or other unexpected issues
              print(f"Error during token validation: {e}")
-             import traceback
              traceback.print_exc() # Log detailed error for debugging
              return jsonify({'message': 'Token validation error'}), 500
 

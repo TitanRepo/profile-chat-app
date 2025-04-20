@@ -1,5 +1,6 @@
-# app.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_cors import CORS
 import google.generativeai as genai
 import os
@@ -16,7 +17,9 @@ from auth_decorator import token_required
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
+frontend_url = os.getenv("FRONTEND_URL", "*") # Get your deployed frontend URL from env
+CORS(app, origins=[frontend_url], supports_credentials=True) # Allow only your frontend
 
 # --- Global Variables & Configuration ---
 structured_resume_data = {}
@@ -25,8 +28,36 @@ chroma_collection = None
 genai_model = None
 SIMILARITY_THRESHOLD = 0.7 # Adjust as needed (lower L2/Cosine distance means more similar)
 
-# --- Initialization Functions ---
+# Initialize Flask-Limiter
+# Define a key function that uses the user ID stored in 'g' by the auth decorator
+# Fallback to IP address if g.user_id isn't set (shouldn't happen for protected routes)
+def get_user_id_key():
+    # Access the user ID stored by the token_required decorator
+    user_id = g.get('user_id', None)
+    if user_id:
+        # print(f"Rate limiting key: user_{user_id}") # Debugging print
+        return f"user_{user_id}" # Prefix to distinguish from other keys like IP addresses
+    # Fallback for safety, though this route requires auth
+    # print(f"Rate limiting key: ip_{get_remote_address()}") # Debugging print
+    return get_remote_address()
 
+# Get Valkey/Redis URL from environment variable
+# Provide a default fallback (e.g., local Redis or memory) if needed,
+# but for production, ensure VALKEY_URL is set.
+valkey_connection_uri = os.getenv("VALKEY_URL")
+if not valkey_connection_uri:
+    print("WARNING: VALKEY_URL environment variable not set. Falling back to memory storage for rate limiter.")
+    valkey_connection_uri = "memory://" # Or raise an error if Valkey is mandatory
+
+limiter = Limiter(
+    key_func=get_user_id_key,
+    app=app,
+    default_limits=["100 per day", "25 per hour"], # Optional default limits for all routes
+    storage_uri=valkey_connection_uri, # <-- USE THE VARIABLE HERE
+    strategy="fixed-window" # Consider 'fixed-window' or 'moving-window' for distributed systems
+)
+
+# --- Initialization Functions ---
 def load_structured_data(filename='resume_data_structured.json'):
     """Loads chunks and embeddings from the JSON file."""
     global structured_resume_data
@@ -135,7 +166,7 @@ def initialize_genai():
         print(f"Error configuring Gemini: {e}")
         return False
 
-# **NEW**: PII Redaction Function
+# PII Redaction Function
 def redact_pii(text):
     """Redacts email addresses and basic phone numbers from text."""
     if not isinstance(text, str): # Ensure input is a string
@@ -167,6 +198,7 @@ if not IS_INITIALIZED:
 # --- API Endpoint ---
 @app.route('/query', methods=['POST'])
 @token_required # Ensure the user is authenticated
+@limiter.limit("10 per minute") # Example: Limit each user to 10 requests/minute
 def handle_query():
     start_time = time.time()
     if not IS_INITIALIZED or not genai_model or not chroma_collection or not embedding_model:
@@ -323,7 +355,8 @@ def handle_query():
 
 # Add this line to explicitly export the app for WSGI servers like Gunicorn/Waitress
 wsgi_app = app.wsgi_app
+print("Starting Flask app...")
 
-if __name__ == '__main__':
-    print("Starting Flask app...")
-    app.run(debug=False, port=5000, host='127.0.0.1')
+# if __name__ == '__main__':
+    # print("Starting Flask app...")
+    # app.run(debug=False, port=5000, host='127.0.0.1')
