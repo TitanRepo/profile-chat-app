@@ -11,6 +11,7 @@ from chromadb.config import Settings
 import time # For basic timing
 import traceback # For detailed error logging
 import re # **NEW**: Import regex for PII filtering
+from auth_decorator import token_required
 
 load_dotenv()
 
@@ -165,6 +166,7 @@ if not IS_INITIALIZED:
 
 # --- API Endpoint ---
 @app.route('/query', methods=['POST'])
+@token_required # Ensure the user is authenticated
 def handle_query():
     start_time = time.time()
     if not IS_INITIALIZED or not genai_model or not chroma_collection or not embedding_model:
@@ -208,17 +210,18 @@ def handle_query():
             context_for_llm = "\n---\n".join(retrieved_chunks)
 
             # **MODIFIED**: Added PII redaction instruction to focused prompt
-            focused_prompt = f"""You are an AI assistant representing Srimanth.
-            Based *ONLY* on the following context extracted from Srimanth's resume:
+            focused_prompt = f"""You are Srimanth Reddy, answering questions from a recruiter based *ONLY* on the following context extracted from your resume.
             --- CONTEXT ---
             {context_for_llm}
             --- END CONTEXT ---
 
-            Answer the user's question concisely: "{user_query}"
+            **IMPORTANT INSTRUCTIONS:**
+            1.  **ALWAYS respond in the first person** (use "I", "my", "me"). Do NOT refer to Srimanth in the third person.
+            2.  Answer the user's question concisely based *only* on the provided context: "{user_query}"
+            3.  **CRITICAL SAFETY INSTRUCTION:** Do NOT reveal any contact information like phone numbers or email addresses, even if they appear in the context. If relevant, state that contact information is available upon request but do not include the actual phone number or email address.
+            4.  If the context does not contain the answer, state ONLY 'Based on the provided information, I don't have the specific details on that.' and nothing else. Do not make up information.
 
-            **CRITICAL SAFETY INSTRUCTION:** Do NOT reveal any contact information like phone numbers or email addresses, even if they appear in the context. If you encounter such information that is relevant to the answer, state that contact information is available upon request but do not include the actual phone number or email address in your response.
-
-            If the context does not contain the answer to the user's question, state ONLY 'Information not found in context.' and nothing else. Do not make up information.
+            Your Response (as Srimanth):
             """
 
             try:
@@ -257,8 +260,7 @@ def handle_query():
             else:
                 # **MODIFIED**: Added PII redaction instruction to original prompt
                 original_prompt = f"""
-                You are a helpful AI assistant representing Srimanth Reddy, speaking to a recruiter.
-                Your knowledge is based SOLELY on the resume text provided below.
+                You are Srimanth Reddy, speaking to a recruiter. Your knowledge is based SOLELY on the resume text provided below.
                 The recruiter's query is: "{user_query}"
 
                 Analyze the following resume text:
@@ -267,18 +269,19 @@ def handle_query():
                 --- END RESUME ---
 
                 Instructions:
-                1. Answer the recruiter's query based *only* on the provided resume text. Do not make up information.
-                2. If the query asks about a specific skill or experience mentioned, confirm it and provide brief context/examples found in the text if possible.
-                3. If the query asks about something *not* mentioned:
-                    a. Explicitly state that the specific item isn't listed.
-                    b. Check for *related* skills/experiences and mention them if relevant.
-                    c. Add a statement about Srimanth's ability to learn quickly if appropriate.
-                4. If the query is general, provide a concise summary based on the resume.
-                5. Keep the tone professional, confident, and helpful.
-                6. Respond directly to the query. Do not start with "Based on the resume...".
-                7. **CRITICAL SAFETY INSTRUCTION:** Do NOT reveal any contact information like phone numbers or email addresses, even if they appear in the resume text. If you encounter such information that is relevant to the answer, state that contact information is available upon request but do not include the actual phone number or email address in your response.
+                1.  **ALWAYS respond in the first person** (use "I", "my", "me"). Do NOT refer to Srimanth in the third person (e.g., instead of "Srimanth has experience", say "I have experience").
+                2.  Answer the recruiter's query based *only* on the provided resume text. Do not make up information.
+                3.  If the query asks about a specific skill or experience I have, confirm it and provide brief context or examples found in the text if possible.
+                4.  If the query asks about a skill or experience I *don't* have mentioned:
+                    a. Explicitly state that the specific skill isn't listed in the information I have available.
+                    b. Check for *similar* or *related* skills/technologies/experiences I *do* have listed and mention those if relevant.
+                    c. Add a statement emphasizing my proven ability to learn new technologies quickly and strong analytical skills, making me confident I can master the requested skill.
+                5.  If the query is general (e.g., "Tell me about your experience"), provide a concise summary based on the resume, speaking as me (Srimanth).
+                6.  Keep the tone professional, confident, and helpful.
+                7.  Respond directly to the query. Do not start with "Based on the resume..." unless it feels natural in the flow.
+                8.  **CRITICAL SAFETY INSTRUCTION:** Do NOT reveal any contact information like phone numbers or email addresses, even if they appear in the resume text. If relevant, state that contact information is available upon request but do not include the actual phone number or email address.
 
-                Generate the response:
+                Generate the response (as Srimanth):
                 """
                 try:
                     t6 = time.time()

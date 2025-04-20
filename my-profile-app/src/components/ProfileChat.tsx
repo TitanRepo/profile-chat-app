@@ -3,6 +3,7 @@
 // src/components/ProfileChat.js (or place directly in pages/index.js)
 import { type FC, useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Mic, Square } from 'lucide-react'; // Using lucide-react for icons
+import { fetchAuthSession } from 'aws-amplify/auth'; // Import the function
 
 // Define the structure for a chat message
 interface Message {
@@ -86,6 +87,24 @@ export default function ProfileChat() {
         window.speechSynthesis.cancel();
     }
 
+    let idToken = '';
+    try {
+        const session = await fetchAuthSession(); // Get current session
+        idToken = session.tokens?.idToken?.toString() ?? ''; // Get the ID token string
+        if (!idToken) {
+            console.error("No ID token found in session. User might not be logged in.");
+            // Handle appropriately - maybe force sign-in or show error
+            addMessage("Error: Authentication token not found. Please sign in again.", 'system');
+            setIsThinking(false); // Ensure thinking state is reset
+            return; // Stop before making the fetch call
+        }
+    } catch (error) {
+        console.error("Error fetching auth session:", error);
+        addMessage("Error: Could not retrieve authentication session.", 'system');
+        setIsThinking(false);
+        return;
+    }
+
     addMessage(textToSend, 'user');
     // **FIXED**: Always clear the input after adding the user message, regardless of source
     setUserInput('');
@@ -97,7 +116,11 @@ export default function ProfileChat() {
       console.log(`Sending to backend: ${backendUrl}`, { query: textToSend });
       const response = await fetch(backendUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${idToken}` // Use the ID token for authentication
+        },
         body: JSON.stringify({ query: textToSend }),
         signal: AbortSignal.timeout(30000)
       });
