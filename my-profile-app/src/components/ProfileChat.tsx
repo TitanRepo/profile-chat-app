@@ -1,8 +1,7 @@
 "use client";
 
-// src/components/ProfileChat.js (or place directly in pages/index.js)
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Mic, Square } from 'lucide-react'; // Using lucide-react for icons
+import { Send, Mic, Square } from 'lucide-react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
 // Define the structure for a chat message
@@ -49,7 +48,6 @@ export default function ProfileChat() {
 
   // --- Core Functions (Defined before useEffect hooks that depend on them) ---
 
-  // Adds a new message to the chat display
   const addMessage = useCallback((text: string, sender: 'user' | 'assistant' | 'system') => {
     setMessages((prevMessages) => [
       ...prevMessages,
@@ -57,7 +55,6 @@ export default function ProfileChat() {
     ]);
   }, []);
 
-  // Uses Text-to-Speech to speak the assistant's response
   const speak = useCallback((text: string) => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window && text) {
       window.speechSynthesis.cancel();
@@ -74,7 +71,6 @@ export default function ProfileChat() {
     }
   }, []);
 
-  // Handles sending the message (from input or voice)
   const handleSendMessage = useCallback(async (messageText: string | null = null) => {
     const textToSend = (messageText ?? userInput).trim();
     if (!textToSend || isThinking) return;
@@ -90,13 +86,11 @@ export default function ProfileChat() {
         if (!idToken) {
             console.error("No ID token found in session. User might not be logged in.");
             addMessage("Error: Authentication token not found. Please sign in again.", 'system');
-            setIsThinking(false);
             return;
         }
     } catch (error) {
         console.error("Error fetching auth session:", error);
         addMessage("Error: Could not retrieve authentication session.", 'system');
-        setIsThinking(false);
         return;
     }
 
@@ -110,7 +104,7 @@ export default function ProfileChat() {
       console.log(`Sending to backend: ${backendUrl}`, { query: textToSend });
       const response = await fetch(backendUrl, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': `Bearer ${idToken}`
@@ -127,8 +121,8 @@ export default function ProfileChat() {
         try {
           const errorData = await response.json();
           errorDetails = `Error: ${errorData.error || JSON.stringify(errorData)}`;
-        } catch {
-          console.warn("Could not parse error response body as JSON.");
+        } catch (e) {
+            console.warn("Could not parse error response body as JSON.", e);
         }
         const fetchError = new Error(errorDetails) as FetchError;
         fetchError.status = response.status;
@@ -140,6 +134,9 @@ export default function ProfileChat() {
       const assistantResponse = data.answer || "Sorry, I received an empty response.";
       addMessage(assistantResponse, 'assistant');
       speak(assistantResponse);
+      if (data.source) {
+          console.log("Backend answer source:", data.source);
+      }
 
     } catch (error: unknown) {
       setIsThinking(false);
@@ -162,7 +159,7 @@ export default function ProfileChat() {
     }
 
     let recognition: SpeechRecognition | null = null;
-    
+
     const initializeRecognition = () => {
       const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognitionAPI) {
@@ -171,13 +168,12 @@ export default function ProfileChat() {
         setIsSpeechRecognitionSupported(false);
         return null;
       }
-
-      const recognition = new SpeechRecognitionAPI();
-      recognition.continuous = false;
-      recognition.lang = 'en-US';
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-      return recognition;
+      const recognitionInstance = new SpeechRecognitionAPI();
+      recognitionInstance.continuous = false;
+      recognitionInstance.lang = 'en-US';
+      recognitionInstance.interimResults = false;
+      recognitionInstance.maxAlternatives = 1;
+      return recognitionInstance;
     };
 
     try {
@@ -187,44 +183,36 @@ export default function ProfileChat() {
       setIsSpeechRecognitionSupported(true);
       recognitionRef.current = recognition;
 
+      // Define handlers using component scope variables/setters
       recognition.onresult = (event: SpeechRecognitionEvent) => {
         const transcript = event.results[event.results.length - 1][0].transcript.trim();
         console.log('Transcript received:', transcript);
         if (transcript) {
           handleSendMessage(transcript);
+          setIsListening(false);
+          // Clear status message if it was related to listening
+          setStatusMessage(prev => (prev === 'Listening...' || prev === 'Speech detected...') ? '' : prev);
         }
-        setIsListening(false);
-        setStatusMessage('');
+        // No need to explicitly stop/abort if continuous=false, onend should fire.
       };
 
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        if (event.error === 'aborted') {
-          console.log('Speech recognition aborted.');
-          setIsListening(false);
-          setStatusMessage('');
-          return;
+        let currentError = event.error;
+        console.error('Speech recognition error:', currentError, event.message);
+        if (currentError === 'aborted') {
+          console.log('Speech recognition aborted (potentially expected).');
+        } else {
+            let errorMsg = `Speech error: ${currentError}`;
+            if (currentError === 'not-allowed' || currentError === 'service-not-allowed') {
+              errorMsg = 'Mic permission denied. Please allow microphone access.';
+            } else if (currentError === 'no-speech') {
+              errorMsg = 'No speech detected. Please try again.';
+            } else if (currentError === 'audio-capture') {
+                errorMsg = 'Microphone not found or not working.';
+            }
+            setStatusMessage(errorMsg);
         }
-        
-        console.error('Speech recognition error:', event.error);
-        let errorMsg = 'Speech error occurred';
-        
-        switch (event.error) {
-          case 'not-allowed':
-          case 'service-not-allowed':
-            errorMsg = 'Mic permission denied. Please allow microphone access.';
-            break;
-          case 'no-speech':
-            errorMsg = 'No speech detected. Please try again.';
-            break;
-          case 'audio-capture':
-            errorMsg = 'Microphone not found or not working.';
-            break;
-          default:
-            errorMsg = `Speech error: ${event.error}`;
-        }
-        
-        setStatusMessage(errorMsg);
-        setIsListening(false);
+        setIsListening(false); // Ensure listening state is always reset on error/abort
       };
 
       recognition.onaudiostart = () => {
@@ -234,11 +222,11 @@ export default function ProfileChat() {
       };
 
       recognition.onend = () => {
-        console.log('Speech recognition ended.');
-        if (statusMessage === 'Listening...' || statusMessage === 'Speech detected...') {
-          setStatusMessage('');
-        }
+        console.log('Speech recognition service disconnected.');
+        // This should reliably set listening to false when recognition ends naturally or via abort/error
         setIsListening(false);
+        // Clear status message only if it was related to active listening/detection
+        setStatusMessage(prev => (prev === 'Listening...' || prev === 'Speech detected...') ? '' : prev);
       };
 
       recognition.onspeechstart = () => {
@@ -247,7 +235,7 @@ export default function ProfileChat() {
       };
 
       recognition.onspeechend = () => {
-        console.log('Speech ended.');
+          console.log('Speech ended.');
       };
 
     } catch (error) {
@@ -257,73 +245,76 @@ export default function ProfileChat() {
       setIsSpeechRecognitionSupported(false);
     }
 
+    // Cleanup function
     return () => {
-      if (recognitionRef.current) {
-        try {
-          if (isListening) {
-            recognitionRef.current.abort();
-          }
-          recognitionRef.current = null;
-        } catch (error) {
-          console.warn('Error during speech recognition cleanup:', error);
-        }
+      const currentRecognition = recognitionRef.current;
+      if (currentRecognition) {
+        console.log('Cleaning up speech recognition.');
+        currentRecognition.onresult = null;
+        currentRecognition.onerror = null;
+        currentRecognition.onend = null;
+        currentRecognition.onaudiostart = null;
+        currentRecognition.onspeechstart = null;
+        currentRecognition.onspeechend = null;
+        currentRecognition.abort();
+        recognitionRef.current = null;
       }
     };
-  }, []); // Only run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSendMessage]);
 
-  // Starts the speech recognition process
+  // --- Auto-scroll messages ---
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // --- More Core Functions ---
+
   const startListening = useCallback(() => {
-    if (!isSpeechRecognitionSupported || !recognitionRef.current || isListening || isThinking) {
-      console.log("Cannot start listening:", {
-        supported: isSpeechRecognitionSupported,
-        hasRecognition: !!recognitionRef.current,
-        isListening,
-        isThinking
-      });
-      if (!isSpeechRecognitionSupported) {
-        setStatusMessage("Speech recognition not supported.");
-      }
-      return;
+    const currentRecognition = recognitionRef.current;
+    if (!isSpeechRecognitionSupported || !currentRecognition || isListening || isThinking) {
+        console.log("Cannot start listening:", { supported: isSpeechRecognitionSupported, hasRecognition: !!currentRecognition, isListening, isThinking });
+        if (!isSpeechRecognitionSupported) setStatusMessage("Speech recognition not supported.");
+        return;
     }
-
     try {
       setUserInput('');
-      // Start recognition first, then set status
-      recognitionRef.current.start();
-      setStatusMessage('Listening...');
+      setStatusMessage('Initializing microphone...');
+      currentRecognition.start();
     } catch (error) {
       console.error("Error starting recognition:", error);
       if (error instanceof DOMException && error.name === 'InvalidStateError') {
-        console.log('Recognition was already active, resetting state...');
-        setStatusMessage('');
-        setIsListening(false);
+          console.warn('Recognition reported InvalidStateError on start. Resetting state.');
+          if (recognitionRef.current) {
+              recognitionRef.current.abort();
+          }
+          setIsListening(false);
+          setStatusMessage('Mic ready. Please try again.');
       } else {
-        setStatusMessage('Mic error. Please ensure permission is granted.');
-        setIsListening(false);
+          setStatusMessage('Mic error. Please ensure permission is granted.');
+          setIsListening(false);
       }
     }
-  }, [isSpeechRecognitionSupported, isListening, isThinking]);
+  }, [isListening, isThinking, isSpeechRecognitionSupported]);
 
-  // Stops the speech recognition process
   const stopListening = useCallback(() => {
-    if (!recognitionRef.current) {
-      console.log("No recognition instance available.");
-      return;
+    const currentRecognition = recognitionRef.current;
+    if (!currentRecognition || !isListening) {
+        console.log("Cannot stop listening: Recognition not active or not available.");
+        return;
     }
-
     try {
-      console.log('Stopping recognition...');
-      recognitionRef.current.abort();
-      setStatusMessage('');
-      setIsListening(false);
+      console.log('Manually stopping recognition via abort().');
+      currentRecognition.abort(); // abort() should trigger onerror('aborted') or onend
+      // Explicitly setting state here can sometimes cause race conditions with event handlers.
+      // Rely on onerror/onend to set isListening=false.
     } catch (error) {
       console.error("Error stopping recognition:", error);
       setStatusMessage('Error stopping microphone');
-      setIsListening(false);
+      setIsListening(false); // Force reset state on error
     }
-  }, []);
+  }, [isListening]);
 
-  // Handle Enter key press in input field
   const handleKeyPress = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !isThinking) {
       event.preventDefault();
@@ -335,10 +326,12 @@ export default function ProfileChat() {
   return (
     <div className="bg-gradient-to-br from-gray-100 via-white to-gray-200 dark:from-gray-800 dark:via-gray-900 dark:to-black flex items-center justify-center min-h-screen p-4 font-sans">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl mx-auto overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 4rem)', maxHeight: '800px' }}>
+        {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-700 dark:from-blue-700 dark:to-indigo-800 text-white p-4 shadow-md flex-shrink-0">
-          <h1 className="text-xl font-semibold text-center">Ask Srimanth's AI Assistant</h1>
+          <h1 className="text-xl font-semibold text-center">Ask Srimanth&apos;s AI Assistant</h1>
         </div>
 
+        {/* Chat Messages Area */}
         <div id="messages" className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4 bg-gray-50 dark:bg-gray-900 scrollbar-thin scrollbar-thumb-blue-500 scrollbar-track-gray-200 dark:scrollbar-thumb-blue-700 dark:scrollbar-track-gray-700">
           {messages.map((msg) => (
             <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -367,17 +360,19 @@ export default function ProfileChat() {
           <div ref={messagesEndRef} className="h-1" />
         </div>
 
+        {/* Status Bar */}
         <div className="px-4 py-1 text-xs md:text-sm text-center text-gray-500 dark:text-gray-400 h-6 flex-shrink-0">
           {statusMessage}
         </div>
 
+        {/* Input Area */}
         <div className="border-t border-gray-200 dark:border-gray-700 p-3 md:p-4 bg-white dark:bg-gray-800 flex-shrink-0">
           <div className="flex items-center space-x-2">
             <input
               type="text"
               id="user-input"
               aria-label="Chat input"
-              placeholder={isListening ? "I&apos;m thinking..." : "Type your question or use the mic..."}
+              placeholder={isListening ? "Listening..." : "Type your question or use the mic..."}
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
               onKeyDown={handleKeyPress}
