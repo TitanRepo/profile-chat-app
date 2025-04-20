@@ -76,7 +76,7 @@ def generate_embeddings(text_chunks, model_name='all-MiniLM-L6-v2'):
 if __name__ == "__main__":
     # Default path or accept command line argument
     # *** IMPORTANT: Update this path to your actual resume file ***
-    default_resume_path = 'C:/Users/Srimanth/Downloads/SRP-SPR.pdf' # CHANGE THIS
+    default_resume_path = 'C:/Users/Srimanth/Downloads/Chat App Resume.pdf' # CHANGE THIS
     resume_file = sys.argv[1] if len(sys.argv) > 1 else default_resume_path
 
     # Check if file exists
