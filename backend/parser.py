@@ -4,16 +4,16 @@ import json
 import os
 import sys
 from sentence_transformers import SentenceTransformer
-# Using LangChain's splitter is convenient, install if needed: pip install langchain
-# If you don't want LangChain, you'll need to implement your own chunking logic.
+from rank_bm25 import BM25Okapi
+import pickle # To save the BM25 object
+
+# Using LangChain's splitter is convenient
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 except ImportError:
     print("Warning: LangChain not found. Chunking will be very basic.")
-    # Basic fallback chunking (split by double newline)
     def basic_chunker(text):
         return [chunk for chunk in text.split('\n\n') if chunk.strip()]
-    # Assign the fallback
     RecursiveCharacterTextSplitter = None
 
 
@@ -29,7 +29,9 @@ def parse_resume_pdf(pdf_path):
                 try:
                     page_text = page.extract_text()
                     if page_text:
-                        text += page_text + "\n" # Add newline between pages
+                        # Basic cleaning - remove excessive newlines/spaces
+                        cleaned_page = re.sub(r'\s{2,}', ' ', page_text.replace('\n', ' '))
+                        text += cleaned_page + "\n" # Use newline as separator again
                     else:
                         print(f"Warning: No text extracted from page {i+1}")
                 except Exception as page_e:
@@ -51,7 +53,8 @@ def chunk_text(text, chunk_size=700, chunk_overlap=70):
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=len,
-            is_separator_regex=False,
+            is_separator_regex=False, # Treat newlines as separators if needed
+            separators=["\n\n", "\n", ". ", " ", ""] # Common separators
         )
         return text_splitter.split_text(text)
     else:
@@ -66,23 +69,33 @@ def generate_embeddings(text_chunks, model_name='all-MiniLM-L6-v2'):
         print("Generating embeddings...")
         embeddings = model.encode(text_chunks, show_progress_bar=True)
         print(f"Generated {len(embeddings)} embeddings.")
-        # Convert numpy arrays to lists for JSON serialization
         return [emb.tolist() for emb in embeddings]
     except Exception as e:
         print(f"Error generating embeddings: {e}")
         return None
 
+# Function to create BM25 index
+def create_bm25_index(text_chunks):
+    """Creates a BM25 index from text chunks."""
+    print("Tokenizing chunks for BM25...")
+    # Basic tokenization: lowercase and split by space. Consider more robust tokenization (e.g., nltk, spacy)
+    tokenized_corpus = [chunk.lower().split(" ") for chunk in text_chunks]
+    print("Creating BM25 index...")
+    try:
+        bm25 = BM25Okapi(tokenized_corpus)
+        print("BM25 index created.")
+        return bm25
+    except Exception as e:
+        print(f"Error creating BM25 index: {e}")
+        return None
+
 # --- Main execution logic ---
 if __name__ == "__main__":
-    # Default path or accept command line argument
-    # *** IMPORTANT: Update this path to your actual resume file ***
-    default_resume_path = 'C:/Users/Srimanth/Downloads/Chat App Resume.pdf' # CHANGE THIS
+    default_resume_path = 'C:/Users/Srimanth/Downloads/Profile Chat Resume.pdf' # CHANGE THIS
     resume_file = sys.argv[1] if len(sys.argv) > 1 else default_resume_path
 
-    # Check if file exists
     if not os.path.exists(resume_file):
         print(f"Error: Resume file not found at {resume_file}")
-        print("Please provide the correct path to your PDF resume as a command line argument or update the default_resume_path variable in the script.")
         sys.exit(1)
 
     print(f"Processing resume file: {resume_file}")
@@ -104,26 +117,46 @@ if __name__ == "__main__":
             print("Error: Failed to generate embeddings.")
             sys.exit(1)
 
-        # 3. Prepare data for JSON
-        # We save raw_text for the fallback scenario
+        # 3. Create BM25 Index
+        bm25_index = create_bm25_index(chunks)
+        if not bm25_index:
+            print("Error: Failed to create BM25 index.")
+            # Decide if you want to exit or continue without BM25
+            sys.exit(1)
+
+        # 4. Prepare data for JSON (excluding BM25 object)
         resume_data_structured = {
             "raw_text": raw_text,
             "chunks": chunks,
             "embeddings": embeddings
+            # BM25 object will be saved separately using pickle
         }
 
-        # 4. Save structured data
-        output_filename = 'resume_data_structured.json'
-        output_path = os.path.join(os.path.dirname(__file__), output_filename)
+        # 5. Save structured data (JSON)
+        output_filename_json = 'resume_data_structured.json'
+        output_path_json = os.path.join(os.path.dirname(__file__), output_filename_json)
         try:
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with open(output_path_json, 'w', encoding='utf-8') as f:
                 json.dump(resume_data_structured, f, indent=4)
-            print(f"Structured resume data saved to: {output_path}")
+            print(f"Structured resume data saved to: {output_path_json}")
+        except Exception as e:
+            print(f"Error saving structured resume data (JSON): {e}")
+            sys.exit(1) # Exit if JSON saving fails
+
+        # 6. Save BM25 index (Pickle)
+        output_filename_bm25 = 'resume_bm25_index.pkl'
+        output_path_bm25 = os.path.join(os.path.dirname(__file__), output_filename_bm25)
+        try:
+            with open(output_path_bm25, 'wb') as f_pkl:
+                pickle.dump(bm25_index, f_pkl)
+            print(f"BM25 index saved to: {output_path_bm25}")
             print("---")
-            print(f"IMPORTANT: Make sure the Flask app ('app.py') loads '{output_filename}'")
+            print(f"IMPORTANT: Ensure Flask app ('app.py') loads BOTH '{output_filename_json}' AND '{output_filename_bm25}'")
             print("---")
         except Exception as e:
-            print(f"Error saving structured resume data: {e}")
+            print(f"Error saving BM25 index (Pickle): {e}")
+            # Decide if you want to exit or allow running without BM25 cache
+
     else:
         print("Failed to extract text from the resume.")
         sys.exit(1)
