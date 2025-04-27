@@ -25,8 +25,6 @@ declare global {
         webkitSpeechRecognition?: typeof SpeechRecognition;
         SpeechRecognitionEvent?: typeof SpeechRecognitionEvent;
         SpeechRecognitionErrorEvent?: typeof SpeechRecognitionErrorEvent;
-        // Add SpeechSynthesisUtteranceEvent if needed for more specific typing
-        SpeechSynthesisUtteranceEvent?: typeof SpeechSynthesisUtteranceEvent;
     }
 }
 
@@ -83,20 +81,18 @@ export default function ProfileChat() {
       };
 
       // Handle 'interrupted' error gracefully
-      utterance.onerror = (event: SpeechSynthesisEvent | Event) => {
-        // Check if it's the specific SpeechSynthesisUtteranceEvent for error property
+      utterance.onerror = (event: SpeechSynthesisEvent | Event) => { // Type hint remains SpeechSynthesisEvent
         let errorType = 'unknown';
-        if ('error' in event && typeof event.error === 'string') {
-             errorType = event.error;
+        // Check the 'error' property specific to SpeechSynthesisEvent
+        if ('error' in event && typeof (event as SpeechSynthesisEvent).error === 'string') {
+             errorType = (event as SpeechSynthesisEvent).error;
         } else if (event instanceof ErrorEvent) { // Fallback for generic ErrorEvent
              errorType = event.message;
         }
 
         if (errorType === 'interrupted') {
-            // Log expected interruptions calmly
             console.log(`Speech synthesis interrupted (error type: ${errorType}). This is usually expected.`);
         } else {
-            // Log other errors as actual problems
             console.error(`Speech synthesis error: ${errorType}`, event);
         }
         setIsSpeaking(false); // Ensure speaking state is reset on any error/interruption
