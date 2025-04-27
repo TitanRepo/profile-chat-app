@@ -1,6 +1,5 @@
 "use client";
 
-// src/components/ProfileChat.tsx (or similar)
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Mic, Square, StopCircle } from 'lucide-react';
 import { fetchAuthSession } from 'aws-amplify/auth';
@@ -60,10 +59,13 @@ export default function ProfileChat() {
   // Updated speak function to manage isSpeaking state and handle interruptions
   const speak = useCallback((text: string) => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window && text) {
-      if (window.speechSynthesis.speaking) {
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        console.log("Cancelling previous speech before speaking new text.");
         window.speechSynthesis.cancel();
       }
+       // Ensure state is reset before new utterance starts
       setIsSpeaking(false);
+
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
@@ -76,29 +78,24 @@ export default function ProfileChat() {
       };
 
       utterance.onend = () => {
-        console.log("Speech synthesis finished or cancelled.");
+        // This handler is called when speech finishes normally OR is cancelled.
+        console.log("Speech synthesis finished or cancelled (onend).");
         setIsSpeaking(false);
       };
 
-      // Handle 'interrupted' error gracefully
-      utterance.onerror = (event: SpeechSynthesisEvent | Event) => { // Type hint remains SpeechSynthesisEvent
-        let errorType = 'unknown';
-        // Check the 'error' property specific to SpeechSynthesisEvent
-        if ('error' in event && typeof (event as SpeechSynthesisEvent).error === 'string') {
-             errorType = (event as SpeechSynthesisEvent).error;
-        } else if (event instanceof ErrorEvent) { // Fallback for generic ErrorEvent
-             errorType = event.message;
-        }
-
-        if (errorType === 'interrupted') {
-            console.log(`Speech synthesis interrupted (error type: ${errorType}). This is usually expected.`);
-        } else {
-            console.error(`Speech synthesis error: ${errorType}`, event);
-        }
-        setIsSpeaking(false); // Ensure speaking state is reset on any error/interruption
+      // Simplified onerror handler for SpeechSynthesisEvent
+      utterance.onerror = (event: SpeechSynthesisEvent) => {
+        // Log that an error occurred, but don't rely on event.error property
+        console.error("Speech synthesis error occurred.", event);
+        // We might not know the exact reason (e.g., "interrupted", "synthesis-failed")
+        // but we must ensure the state is reset.
+        setIsSpeaking(false);
       };
 
+      // Clear queue and speak
+      // window.speechSynthesis.cancel(); // Already done above
       window.speechSynthesis.speak(utterance);
+
     } else if (typeof window !== 'undefined' && !('speechSynthesis' in window)) {
       console.warn('Speech synthesis not supported in this browser.');
     }
@@ -106,8 +103,11 @@ export default function ProfileChat() {
 
   const handleStopSpeaking = useCallback(() => {
       if (typeof window !== 'undefined' && window.speechSynthesis) {
-          console.log("Manually stopping speech synthesis.");
-          window.speechSynthesis.cancel();
+          if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+              console.log("Manually stopping speech synthesis via cancel().");
+              window.speechSynthesis.cancel(); // This should trigger the 'onend' handler of the utterance
+          }
+          // Explicitly set state just in case onend doesn't fire immediately or reliably
           setIsSpeaking(false);
       }
   }, []);
